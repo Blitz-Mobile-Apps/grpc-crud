@@ -22,7 +22,7 @@ npm install
 Firstly you will need to generate certs for your system and project. and you can run this command.
 
 ```bash
-npm run gen:
+npm run gen:certificates
 ```
 
 ### Run Grpc Server
