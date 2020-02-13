@@ -1,0 +1,50 @@
+syntax = 'proto3';
+
+message User {
+    int32 id = 1;
+    string name = 2;
+    string email = 3;
+    string phone = 4;
+    int32 verified_at = 5;
+}
+
+message GetAllRequest {}
+
+message GetByIdRequest {
+    int32 id = 1;
+}
+
+message UserRequest {
+    User user = 1;
+}
+
+message UserResponse {
+    User user = 1;
+}
+
+message AllUserResponse {
+    repeated User users = 1;
+}
+
+message AddPhotoRequest {
+    bytes data = 1;
+}
+
+message AddPhotoResponse {
+    bool isOk = 1;
+}
+
+message SuccessResponse {
+    bool isOk = 1;
+    string message = 2;
+}
+
+service UserService {
+    rpc GetById(GetByIdRequest) returns (UserResponse);
+    rpc GetAll(GetAllRequest) returns (stream UserResponse);
+    rpc Save(UserRequest) returns (AllUserResponse);
+    rpc SaveAll(stream UserRequest) returns (stream UserResponse);
+    rpc AddPhoto(stream AddPhotoRequest) returns (AddPhotoResponse);
+    rpc Delete(GetByIdRequest) returns (SuccessResponse);
+    rpc Edit(UserRequest) returns (AllUserResponse);
+}

@@ -1,0 +1,24 @@
+{
+  "name": "grpc-crud",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "gen:certificates": "./scripts/generate_certificate.sh",
+    "server": "nodemon server.js",
+    "client": "nodemon client.js"
+  },
+  "config": {
+    "unsafe-perm": true
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@grpc/proto-loader": "^0.5.3",
+    "grpc": "^1.24.2"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.2"
+  }
+}

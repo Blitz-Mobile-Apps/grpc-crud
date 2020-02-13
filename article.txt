@@ -1,0 +1,345 @@
+In this article we are going to explore GRPC by creating User Crud API using node js and explore few of the possible technique that enable by HTTP2 and GRPC
+
+Here is table content
+
+Secure Connection
+Simple RPC (Unary RPC)
+Server-side Stream RPC
+Client-side Stream RPC
+Bi-directional Stream
+
+Let's get started by creating project for our first GRPC CRUD app
+you need to make a folder and go to the created project by running this command.
+
+`mkdir grpc-crud && cd grpc-crud`
+
+let's initialize npm package.json
+
+`npm init -y`
+
+let's install required package for GRPC and node
+
+`npm install --save @grpc/proto-loader grpc`
+
+we install @grpc/proto-loader for loading .proto files and node grpc for server 
+
+let's install nodemon for development speedup 
+
+`npm install --save-dev nodemon`
+
+if you are not fimiliar with nodemon, here is a great getting started article in medium https://medium.com/front-end-weekly/configuring-nodemon-on-a-node-js-server-da9eed2eeb5
+
+Next we will create a folder called script and store script to generate keys for secure connection.
+
+mkdir scripts && touch scripts/generate_certificate.sh
+
+now paste this pices of code to generate certificate.
+
+`echo "Creating certs folder ..."
+mkdir certs && cd certs
+
+echo "Generating certificates ..."
+
+openssl genrsa -passout pass:1111 -des3 -out ca.key 4096
+
+openssl req -passin pass:1111 -new -x509 -days 365 -key ca.key -out ca.crt -subj  "/C=CL/ST=RM/L=Santiago/O=Test/OU=Test/CN=ca"
+
+openssl genrsa -passout pass:1111 -des3 -out server.key 4096
+
+openssl req -passin pass:1111 -new -key server.key -out server.csr -subj  "/C=CL/ST=RM/L=Santiago/O=Test/OU=Server/CN=localhost"
+
+openssl x509 -req -passin pass:1111 -days 365 -in server.csr -CA ca.crt -CAkey ca.key -set_serial 01 -out server.crt
+
+openssl rsa -passin pass:1111 -in server.key -out server.key
+
+openssl genrsa -passout pass:1111 -des3 -out client.key 4096
+
+openssl req -passin pass:1111 -new -key client.key -out client.csr -subj  "/C=CL/ST=RM/L=Santiago/O=Test/OU=Client/CN=localhost"
+
+openssl x509 -passin pass:1111 -req -days 365 -in client.csr -CA ca.crt -CAkey ca.key -set_serial 01 -out client.crt
+
+openssl rsa -passin pass:1111 -in client.key -out client.key`
+
+echo "Certificates generated successfully"
+
+Open package.json and replace test script with this
+
+"scripts": {
+    "gen:certificates": "./scripts/generate_certificate.sh"
+},
+
+then run this command to generate certificates
+
+`npm run gen:generate_certificate`
+
+if you are linux user you might face some permission issue so make sure to give permission to ./scripts/generate_certificate.sh
+
+chmod +x ./scripts/generate_certificate.sh
+
+let's create a folder called protos to hold all proto files in our case we have only one user.proto
+
+syntax = 'proto3';
+
+message User {
+    int32 id = 1;
+    string name = 3;
+    string email = 4;
+    string phone = 5;
+    string verified_at = 6;
+}
+
+message GetAllRequest {}
+
+message GetByIdRequest {
+    int32 badgeNumber = 1;
+}
+
+message UserRequest {
+    User user = 1;
+}
+
+message UserResponse {
+    User user = 1;
+}
+
+message AddPhotoRequest {
+    bytes data = 1;
+}
+
+message AddPhotoResponse {
+    bool isOk = 1;
+}
+
+service EmployeeService {
+    rpc GetById(GetByIdRequest) returns (UserResponse);
+    rpc GetAll(GetAllRequest) returns (stream UserResponse);
+    rpc Save(UserRequest) returns (UserResponse);
+    rpc SaveAll(stream UserRequest) returns (stream UserResponse);
+    rpc AddPhoto(stream AddPhotoRequest) returns (AddPhotoResponse);
+}
+
+let's create a server folder and UserService.js inside it for keep clean project
+
+UserService.js
+const usersData = require('../data/users');
+
+module.exports = {
+    getAll: (call) => {
+        usersData.forEach(user => {
+            call.write({user: user.dataValues});
+        });
+        call.end();
+    },
+    getById: (call, callback) => {
+
+        const id = call.request.id;
+    
+        const user = usersData.filter(user => user.id === id);
+    
+        if(!user.length)
+        {
+            callback({ message: 'not found' })
+        }
+    
+        callback(null, {user: user});
+    },
+    addPhoto: (call, callback) => {
+        const meta = call.metadata.getMap();
+        for (const key in meta) {
+            const element = meta[key];
+            console.log(element);
+        }
+    
+        let result = new Buffer(0);
+        call.on('data', function(data){
+            result = Buffer.concat([result, data.data]);
+            console.log(`Message received with size ${data.data.length}`);
+        });
+        call.on('end', function(data){
+            callback(null, { isOk: true });
+            console.log(`Total fize size is: ${result.length} bytes`);
+        })
+    },
+    saveAll: (call) => {
+        call.on('data', function(emp){
+            employees.push(emp.employee);
+            call.write({ employee: emp.employee });
+        });
+        call.on('end', function(){
+            employees.forEach(emp => {
+                console.log(emp);
+            });
+            call.end();
+        })
+    },
+    save: (call, callback) => {
+        
+    }
+}
+
+let's create a server.js file and start writing server logics
+
+'use strict';
+
+const PROTO_PATH = "protos/user.proto";
+const protoLoader = require('@grpc/proto-loader')
+
+const fs = require('fs');
+const grpc = require('grpc');
+const serviceDef = grpc.loadPackageDefinition(protoLoader.loadSync(PROTO_PATH));
+const PORT  = 9000;
+
+const cacert = fs.readFileSync(__dirname + '/certs/ca.crt'),
+        cert = fs.readFileSync(__dirname + '/certs/server.crt'),
+        key  = fs.readFileSync(__dirname + '/certs/server.key');
+
+const kvpair = {
+    'private_key': key,
+    'cert_chain' : cert
+}
+
+const UserService = require('./services/UserService');
+
+const creds = grpc.ServerCredentials.createSsl(cacert, [kvpair]);
+
+const server = new grpc.Server();
+
+server.addService(serviceDef.UserService.service, {
+    getById: UserService.getById,
+    getAll : UserService.getAll,
+    addPhoto: UserService.addPhoto,
+    saveAll : UserService.saveAll,
+    save : UserService.save
+});
+
+server.bind(`0.0.0.0:${PORT}`, creds);
+
+console.log(`Starting server on port ${PORT}`);
+
+server.start();
+
+in this server you can see the  service initialization process. we import proto loader and grpc and load proto file and created server with certificates that we created earlier
+
+after that we added services to server from proto service defination. and make all method with object properties.
+
+now it's time to create client for testing service functionality that we just write.
+
+first of all let's create a client.js file and add following code in it.
+
+'use strict';
+
+const PROTO_PATH = "./protos/user.proto";
+const protoLoader = require('@grpc/proto-loader')
+
+const fs = require('fs');
+const grpc = require('grpc');
+const serviceDef = grpc.loadPackageDefinition(protoLoader.loadSync(PROTO_PATH));
+const PORT  = 9000;
+
+const cacert = fs.readFileSync(__dirname + '/certs/ca.crt'),
+        cert = fs.readFileSync(__dirname + '/certs/client.crt'),
+        key  = fs.readFileSync(__dirname + '/certs/client.key');
+
+const creds = grpc.credentials.createSsl(cacert, key, cert);
+const client = new serviceDef.UserService(`localhost:${PORT}`, creds);
+
+const option = parseInt(process.argv[2], 10);
+
+switch (option) {
+    case 1:
+        getById();
+        break;
+    case 2:
+        getAll();
+        break;
+    case 3:
+        addPhoto();
+        break;
+    case 4:
+        save();
+        break;
+    case 5:
+        saveAll();
+        break;
+}
+
+function getById() {
+    client.getById({ id: 1 }, function(error, response){
+        if(error){
+            console.log(error)
+            return;
+        }
+        console.log(response.user)
+    });
+}
+
+function getAll() {
+    const call = client.getAll({});
+
+    call.on('data', function(data){
+        console.log(data.user);
+    });
+}
+
+function addPhoto() {
+    const call = client.addPhoto({}, function(error, response){
+        console.log(response);
+    });
+
+    const stream = fs.createReadStream(__dirname + '/penguins.jpg');
+
+    stream.on('data', function(chunk){
+        call.write({ data: chunk })
+    });
+
+    stream.on('end', function () {
+        call.end();
+    })
+}
+
+function save(){
+    const user = {
+            id: 6,
+            name: 'Arif Iqbal',
+            email: "arifiqbal@outlook.com",
+            phone: "+923452650236",
+        };
+
+    client.save({user}, function(error, response){
+        if(error){
+            console.log(error);
+            return;
+        }
+        console.log(response);
+    });
+}
+
+function saveAll(){
+    const users = [
+        {
+            id: 6,
+            name: 'Hello Another User',
+            email: "helloanotheruser@outlook.com",
+            phone: "+923452650236",
+        },
+        {
+            id: 7,
+            name: 'Hello Another User Again',
+            email: "helloanotheruseragain@outlook.com",
+            phone: "+923452650236",
+        }
+    ];
+
+
+    const call = client.saveAll();
+
+    call.on('data', function (user) {
+        console.log(user);
+    })
+
+    users.forEach( user => call.write({user: user}));
+
+    call.end();
+}
+
+
